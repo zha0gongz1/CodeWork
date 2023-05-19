@@ -23,13 +23,13 @@ func main() {
 		"https://github.com/",
 		"https://github.com/zha0gongz1",
 		"https://shopee.sg/",
-    "https://www.baidu.com",
+		"https://www.baidu.com",
 		"https://www.cnblogs.com/H4ck3R-XiX",
 	}
 
 	var wg sync.WaitGroup
 	var mutex sync.Mutex
-	ch := make(chan struct{}, 10) // 最多允许 10 个并发 goroutine
+	ch := make(chan struct{}, 100) // 最多允许 2 个并发 goroutine
 	for _, url := range urls {
 		wg.Add(1)
 		go func(url string) {
@@ -50,17 +50,19 @@ func main() {
 			//	fmt.Printf("Error reading body: %s\n", url)
 			//	return
 			//}
-			//bodyString := string(bodyBytes)
-			match := re.FindStringSubmatch(string(bodyBytes))
+			bodyString := string(bodyBytes)
+			bodyLen := len(bodyString)
+			match := re.FindStringSubmatch(bodyString)
 			if len(match) != 0 {
 				//fmt.Printf("Title: %s", match[1])
-				fmt.Printf("[%d] %s\tTitle:%s", resp.StatusCode, url, match[1])
+				fmt.Printf("[%d] %s [%d]\tTitle:%s", resp.StatusCode, url, bodyLen, match[1])
 			} else {
-				fmt.Printf("[%d] %s\tTitle:NULL", resp.StatusCode, url)
+				fmt.Printf("[%d] %s [%d]\tTitle:NULL", resp.StatusCode, url, bodyLen)
 			}
-			//fmt.Printf("[%d] %s\tTitle:%s", resp.StatusCode, url, match[1])
+
+			//fmt.Printf("[%d] %s\t[%d]Title:%s", resp.StatusCode, url, bodyLen,match[1])
+
 			fmt.Print("\n")
-      
 			mutex.Unlock()
 		}(url)
 	}
