@@ -1,18 +1,21 @@
 #include <iostream>
+#include <fstream>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <tchar.h>
+
 #pragma warning(disable:4996)
-#pragma comment(lib,"ws2_32.lib")
+#pragma comment(lib, "ws2_32.lib")
+
 using namespace std;
 
 int main() {
-    //1. Initialize WSA variables
+    // 1. Initialize WSA variables
     WSADATA wsaData;
     int wsaerr;
     WORD wVersionRequested = MAKEWORD(2, 2);
     wsaerr = WSAStartup(wVersionRequested, &wsaData);
-    //WSAStartup resturns 0 if it is successfull or non zero if failed
+    // WSAStartup returns 0 if it is successful or non-zero if failed
     if (wsaerr != 0) {
         cout << "The Winsock dll not found!" << endl;
         return 0;
@@ -22,15 +25,13 @@ int main() {
         cout << "The status: " << wsaData.szSystemStatus << endl;
     }
 
-    /*
-    refer ServerCreation.md
-    */
+    // 2. Create a socket
     SOCKET serverSocket;
-    serverSocket = INVALID_SOCKET; //initializing as a inivalid socket
+    serverSocket = INVALID_SOCKET; // initializing as an invalid socket
     serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    //check if creating socket is successfull or not
+    // check if creating socket is successful or not
     if (serverSocket == INVALID_SOCKET) {
-        cout << "Error at socket():" << WSAGetLastError() << endl;
+        cout << "Error at socket(): " << WSAGetLastError() << endl;
         WSACleanup();
         return 0;
     }
@@ -38,18 +39,12 @@ int main() {
         cout << "socket is OK!" << endl;
     }
 
-    /*
-    3. Bind the socket to ip address and port number
-    //refer ServerCreation.md
-    */
-    sockaddr_in service; //initialising service as sockaddr_in structure
+    // 3. Bind the socket to IP address and port number
+    sockaddr_in service; // initializing service as sockaddr_in structure
     service.sin_family = AF_INET;
-    //InetPton(AF_INET, _T("127.0.0.1"), &service.sin_addr.s_addr); 
-    //InetPton function is encountering an issue, so replaced with the following line which uses inet_addr to convert IP address string to the binary form (only for ipv4) and storing it
     service.sin_addr.s_addr = inet_addr("0.0.0.0");
-    //    service.sin_addr.s_addr = inet_addr("192.168.43.42");
     service.sin_port = htons(12345);
-    //using the bind function
+    // using the bind function
     if (bind(serverSocket, (SOCKADDR*)&service, sizeof(service)) == SOCKET_ERROR) {
         cout << "bind() failed: " << WSAGetLastError() << endl;
         closesocket(serverSocket);
@@ -60,7 +55,7 @@ int main() {
         cout << "bind() is OK!" << endl;
     }
 
-    //4. Listen to incomming connections
+    // 4. Listen to incoming connections
     if (listen(serverSocket, 1) == SOCKET_ERROR) {
         cout << "listen(): Error listening on socket: " << WSAGetLastError() << endl;
     }
@@ -68,28 +63,68 @@ int main() {
         cout << "listen() is OK!, I'm waiting for new connections..." << endl;
     }
 
-    //5. accepting incomming connections
-    SOCKET acceptSocket;
-    acceptSocket = accept(serverSocket, NULL, NULL);
-    if (acceptSocket == INVALID_SOCKET) {
-        cout << "accept failed: " << WSAGetLastError() << endl;
+    ofstream outFile;
+    outFile.open("test.txt", ios::app); // Open the file in append mode
+    if (!outFile.is_open()) {
+        cout << "Failed to open file." << endl;
+        closesocket(serverSocket);
         WSACleanup();
         return -1;
     }
-    else {
-        cout << "accept() is OK!" << endl;
+
+    while (true) {
+        // 5. Accept incoming connections
+        SOCKET acceptSocket;
+        acceptSocket = accept(serverSocket, NULL, NULL);
+        if (acceptSocket == INVALID_SOCKET) {
+            cout << "accept failed: " << WSAGetLastError() << endl;
+            continue; // Continue to accept new connections
+        }
+        else {
+            cout << "accept() is OK!" << endl;
+        }
+
+        // 6. Continuously receive data and save it to a file
+        char receiveBuffer[1024];
+        int rbyteCount;
+
+        while (true) {
+            // Clear the buffer
+            memset(receiveBuffer, 0, sizeof(receiveBuffer));
+
+            // Receive data
+            rbyteCount = recv(acceptSocket, receiveBuffer, sizeof(receiveBuffer), 0);
+            if (rbyteCount == SOCKET_ERROR) {
+                int err = WSAGetLastError();
+                if (err == WSAECONNRESET) { //Client disconnection situation, keep listening.
+                    cout << "Connection reset by peer." << endl;
+                }
+                else {
+                    cout << "Server recv error: " << err << endl;
+                }
+                break; // Break the inner loop to accept new connections
+            }
+            else if (rbyteCount == 0) {
+                cout << "Connection closed by client." << endl;
+                break; // Break the inner loop to accept new connections
+            }
+            else {
+                // Write received data to the file
+                outFile << receiveBuffer;
+                outFile << '\n';
+                outFile.flush(); // Ensure data is written to the file immediately
+                cout << "Received data: " << receiveBuffer << endl;
+            }
+        }
+
+        // Close the accepted socket before accepting new connections
+        closesocket(acceptSocket);
     }
 
+    // Clean up
+    outFile.close();
+    closesocket(serverSocket);
+    WSACleanup();
 
-    //6. receiving data
-    char receiveBuffer[1024];
-    int rbyteCount = recv(acceptSocket, receiveBuffer, 1024, 0);
-    if (rbyteCount < 0) {
-        cout << "Server recv error: " << WSAGetLastError() << endl;
-        return 0;
-    }
-    else {
-        cout << "Received data: " << receiveBuffer << endl;
-    }
-
+    return 0;
 }
